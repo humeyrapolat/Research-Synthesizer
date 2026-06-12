@@ -1,19 +1,9 @@
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage
-from src.models.paper import SynthesisReport
+from functools import lru_cache
+
+from src.core.config import get_settings
 from src.core.state import ResearchState
-from dotenv import load_dotenv
-import os
+from src.models.paper import SynthesisReport
 
-load_dotenv()
-
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0.2,
-)
-
-structured_llm = llm.with_structured_output(SynthesisReport)
 
 SYSTEM_PROMPT = """You are a research synthesis expert.
 Your job is to write a clear, well-structured synthesis of multiple research papers.
@@ -25,8 +15,27 @@ The synthesis must:
 - Stay grounded in the evidence — no speculation beyond what the papers support"""
 
 
+@lru_cache(maxsize=1)
+def _get_structured_llm():
+    """Delay heavy Groq/LangChain setup until final synthesis runs."""
+    from langchain_groq import ChatGroq
+
+    settings = get_settings()
+    if not settings.groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=settings.groq_api_key,
+        temperature=0.2,
+    )
+    return llm.with_structured_output(SynthesisReport)
+
+
 def synthesis_node(state: ResearchState) -> dict:
     """LangGraph node: synthesizes all findings into a final report."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
     report = state["contradiction_report"]
     summaries = state["paper_summaries"]
 
@@ -64,6 +73,7 @@ Write a comprehensive synthesis report.
 """),
     ]
 
+    structured_llm = _get_structured_llm()
     synthesis = structured_llm.invoke(messages)
     synthesis.question = state["question"]
     synthesis.sources = sources

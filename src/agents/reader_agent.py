@@ -1,20 +1,27 @@
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage
-from src.models.paper import PaperSummary
-from src.core.state import ResearchState
-from dotenv import load_dotenv
 import asyncio
-import os
+from functools import lru_cache
 
-load_dotenv()
+from src.core.config import get_settings
+from src.core.state import ResearchState
+from src.models.paper import PaperSummary
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0,
-)
 
-structured_llm = llm.with_structured_output(PaperSummary)
+@lru_cache(maxsize=1)
+def _get_structured_llm():
+    """Delay heavy Groq/LangChain setup until summaries are requested."""
+    from langchain_groq import ChatGroq
+
+    settings = get_settings()
+    if not settings.groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=settings.groq_api_key,
+        temperature=0,
+    )
+    return llm.with_structured_output(PaperSummary)
+
 
 SYSTEM_PROMPT = """You are a research paper analyst.
 Extract structured information from the given paper content.
@@ -24,6 +31,9 @@ Confidence score: 1.0 = very clear content, 0.5 = partial content, 0.2 = very sp
 
 async def summarize_single_paper(paper: dict) -> PaperSummary:
     """Summarizes a single paper asynchronously."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    structured_llm = _get_structured_llm()
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=f"""

@@ -1,19 +1,26 @@
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage
-from src.models.paper import ContradictionReport
+from functools import lru_cache
+
+from src.core.config import get_settings
 from src.core.state import ResearchState
-from dotenv import load_dotenv
-import os
+from src.models.paper import ContradictionReport
 
-load_dotenv()
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0,
-)
+@lru_cache(maxsize=1)
+def _get_structured_llm():
+    """Delay heavy Groq/LangChain setup until contradiction analysis runs."""
+    from langchain_groq import ChatGroq
 
-structured_llm = llm.with_structured_output(ContradictionReport)
+    settings = get_settings()
+    if not settings.groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=settings.groq_api_key,
+        temperature=0,
+    )
+    return llm.with_structured_output(ContradictionReport)
+
 
 SYSTEM_PROMPT = """You are a critical research analyst.
 Your job is to compare multiple paper summaries and identify:
@@ -27,6 +34,8 @@ If evidence is one-sided, still report it honestly."""
 
 def contradiction_node(state: ResearchState) -> dict:
     """LangGraph node: detects contradictions across paper summaries."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
     summaries = state["paper_summaries"]
 
     if not summaries:
@@ -58,5 +67,6 @@ Analyze these papers and identify contradictions, consensus points, and open que
 """),
     ]
 
+    structured_llm = _get_structured_llm()
     report = structured_llm.invoke(messages)
     return {"contradiction_report": report}

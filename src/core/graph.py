@@ -1,12 +1,15 @@
-from langgraph.graph import StateGraph, END
-from src.core.state import ResearchState
-from src.agents.search_agent import search_node
-from src.agents.reader_agent import reader_node
-from src.agents.contradiction_agent import contradiction_node
-from src.agents.synthesis_agent import synthesis_node
+from functools import lru_cache
 
 
 def build_graph():
+    from langgraph.graph import END, StateGraph
+
+    from src.agents.contradiction_agent import contradiction_node
+    from src.agents.reader_agent import reader_node
+    from src.agents.search_agent import search_node
+    from src.agents.synthesis_agent import synthesis_node
+    from src.core.state import ResearchState
+
     graph = StateGraph(ResearchState)
 
     graph.add_node("search", search_node)
@@ -23,4 +26,6 @@ def build_graph():
     return graph.compile()
 
 
-research_graph = build_graph()
+@lru_cache(maxsize=1)
+def get_research_graph():
+    return build_graph()
